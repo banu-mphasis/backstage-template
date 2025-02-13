@@ -2,7 +2,7 @@ apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
   name: move-workload
-  title: Move Kubernetes Workload Between Clusters
+  title: Move Kubernetes Workload Between Clusters and changes istio service mesh
   description: Moves an existing workload from one GKE cluster to another
 spec:
   owner: platform-team
