@@ -1,0 +1,120 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: scale-workloads-anthos
+  title: Scale Kubernetes Workloads in Anthos
+  description: Scale workloads manually or automatically (HPA/KEDA) in Google Anthos.
+spec:
+  owner: platform-team
+  type: service
+
+  parameters:
+    - title: Select Scaling Type
+      required:
+        - clusterName
+        - workloadName
+        - namespace
+        - scalingType
+      properties:
+        clusterName:
+          title: Cluster Name
+          type: string
+          description: The Anthos GKE cluster where the workload is running.
+        workloadName:
+          title: Workload Name
+          type: string
+          description: Name of the Deployment/StatefulSet to scale.
+        namespace:
+          title: Namespace
+          type: string
+          description: The Kubernetes namespace where the workload is deployed.
+        scalingType:
+          title: Scaling Type
+          type: string
+          enum:
+            - Manual
+            - Horizontal Pod Autoscaler (HPA)
+            - Event-Driven Scaling (KEDA)
+          description: Choose how to scale the workload.
+
+  steps:
+    - id: validate-cluster
+      name: Validate Cluster Connection
+      action: shell:exec
+      input:
+        command: |
+          gcloud container clusters get-credentials ${{ parameters.clusterName }} --region=us-central1
+
+    - id: scale-manual
+      name: Scale Workload Manually (if selected)
+      if: ${{ parameters.scalingType == 'Manual' }}
+      action: shell:exec
+      input:
+        command: |
+          kubectl scale deployment ${{ parameters.workloadName }} --replicas=5 -n ${{ parameters.namespace }}
+
+    - id: apply-hpa
+      name: Configure Horizontal Pod Autoscaler (HPA)
+      if: ${{ parameters.scalingType == 'Horizontal Pod Autoscaler (HPA)' }}
+      action: shell:exec
+      input:
+        command: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: autoscaling/v2
+          kind: HorizontalPodAutoscaler
+          metadata:
+            name: ${{ parameters.workloadName }}-hpa
+            namespace: ${{ parameters.namespace }}
+          spec:
+            scaleTargetRef:
+              apiVersion: apps/v1
+              kind: Deployment
+              name: ${{ parameters.workloadName }}
+            minReplicas: 2
+            maxReplicas: 10
+            metrics:
+              - type: Resource
+                resource:
+                  name: cpu
+                  target:
+                    type: Utilization
+                    averageUtilization: 75
+          EOF
+
+    - id: apply-keda
+      name: Configure Event-Driven Scaling with KEDA
+      if: ${{ parameters.scalingType == 'Event-Driven Scaling (KEDA)' }}
+      action: shell:exec
+      input:
+        command: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: keda.sh/v1alpha1
+          kind: ScaledObject
+          metadata:
+            name: ${{ parameters.workloadName }}-keda
+            namespace: ${{ parameters.namespace }}
+          spec:
+            scaleTargetRef:
+              apiVersion: apps/v1
+              kind: Deployment
+              name: ${{ parameters.workloadName }}
+            minReplicaCount: 1
+            maxReplicaCount: 20
+            triggers:
+              - type: gcp-pubsub
+                metadata:
+                  subscriptionName: my-pubsub-subscription
+          EOF
+
+    - id: verify-scaling
+      name: Verify Scaling
+      action: shell:exec
+      input:
+        command: |
+          kubectl get hpa -n ${{ parameters.namespace }}
+          kubectl get scaledobjects.keda.sh -n ${{ parameters.namespace }}
+
+  output:
+    links:
+      - title: View Workload in Anthos
+        url: https://console.cloud.google.com/kubernetes/deployment/us-central1/${{ parameters.clusterName }}/workloads/${{ parameters.workloadName }}
