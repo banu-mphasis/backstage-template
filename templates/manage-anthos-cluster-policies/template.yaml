@@ -1,0 +1,81 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: anthos-cluster-policy
+  title: Manage Anthos Cluster Policies
+  description: Create and modify Kubernetes cluster policies using Anthos Config Management (ACM) and Policy Controller.
+spec:
+  owner: platform-team
+  type: service
+
+  parameters:
+    - title: Choose Cluster and Policy Details
+      required:
+        - clusterName
+        - policyName
+        - policyType
+        - namespace
+      properties:
+        clusterName:
+          title: Target Cluster Name
+          type: string
+          description: The GKE/Anthos cluster where the policy should be applied.
+        policyName:
+          title: Policy Name
+          type: string
+          description: Name of the policy (e.g., restrict-privileged-containers).
+        policyType:
+          title: Policy Type
+          type: string
+          enum:
+            - NetworkPolicy
+            - SecurityPolicy
+            - ResourceQuota
+            - Custom OPA Policy
+          description: Type of policy to create or modify.
+        namespace:
+          title: Namespace
+          type: string
+          description: The Kubernetes namespace to which this policy applies.
+
+  steps:
+    - id: validate-cluster
+      name: Validate Cluster Connection
+      action: shell:exec
+      input:
+        command: |
+          gcloud container clusters get-credentials ${{ parameters.clusterName }} --region=us-central1
+
+    - id: create-policy
+      name: Create or Modify Cluster Policy
+      action: shell:exec
+      input:
+        command: |
+          mkdir -p policies
+          cat <<EOF > policies/${{ parameters.policyName }}.yaml
+          apiVersion: constraints.gatekeeper.sh/v1beta1
+          kind: K8s${{ parameters.policyType }}
+          metadata:
+            name: ${{ parameters.policyName }}
+          spec:
+            match:
+              kinds:
+                - apiGroups: [""]
+                  kinds: ["Pod"]
+              namespaces: ["${{ parameters.namespace }}"]
+            parameters:
+              enforcementAction: deny
+          EOF
+          kubectl apply -f policies/${{ parameters.policyName }}.yaml
+
+    - id: verify-policy
+      name: Verify Policy Enforcement
+      action: shell:exec
+      input:
+        command: |
+          kubectl get constraints --namespace=${{ parameters.namespace }}
+
+  output:
+    links:
+      - title: View Cluster Policies
+        url: https://console.cloud.google.com/kubernetes/config-management/clusters/${{ parameters.clusterName }}
